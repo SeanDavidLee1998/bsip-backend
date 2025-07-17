@@ -19,10 +19,28 @@ const { sendBulkEmails, testConnection, getEmailTemplates } = require('./bulkEma
 const smsRoutes = require('./routes/smsRoutes'); // Import SMS routes
 
 // Initialize Firebase Admin SDK
-const serviceAccount = require('./firebase-service-account.json');
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
-});
+let serviceAccount;
+if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+  // Use environment variable (for production)
+  serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+} else {
+  // Use local file (for development)
+  try {
+    serviceAccount = require('./firebase-service-account.json');
+  } catch (error) {
+    console.log('Firebase service account not found. Firebase features will be disabled.');
+    serviceAccount = null;
+  }
+}
+
+if (serviceAccount) {
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+  });
+} else {
+  // Initialize without credentials (for development/testing)
+  admin.initializeApp();
+}
 
 const db = admin.firestore();
 
