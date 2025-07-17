@@ -6,8 +6,17 @@ sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 // Delay function for throttling
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+const EXCLUDED_EMAILS = [
+  'notifications@trademarkengine.com',
+  'tmapp@legalzoom.com'
+];
+
 // Send bulk emails with delay between messages
 const sendBulkEmails = async (emailList, subject, htmlBody, options = {}) => {
+  // Exclude unwanted emails
+  const filteredEmailList = emailList.filter(
+    email => !EXCLUDED_EMAILS.includes(email.toLowerCase())
+  );
   const {
     delayMs = 500, // 500ms delay between emails
     from = process.env.SENDGRID_FROM || process.env.SMTP_FROM || process.env.SMTP_USER,
@@ -19,15 +28,15 @@ const sendBulkEmails = async (emailList, subject, htmlBody, options = {}) => {
   const results = {
     successful: [],
     failed: [],
-    total: emailList.length,
+    total: filteredEmailList.length,
     startTime: new Date(),
     endTime: null
   };
 
-  console.log(`Starting bulk email send to ${emailList.length} recipients (SendGrid)`);
+  console.log(`Starting bulk email send to ${filteredEmailList.length} recipients (SendGrid)`);
 
-  for (let i = 0; i < emailList.length; i++) {
-    const email = emailList[i];
+  for (let i = 0; i < filteredEmailList.length; i++) {
+    const email = filteredEmailList[i];
     const emailIndex = i + 1;
 
     try {
@@ -83,14 +92,14 @@ const sendBulkEmails = async (emailList, subject, htmlBody, options = {}) => {
       };
 
       await sgMail.send(msg);
-      console.log(`✓ Email ${emailIndex}/${emailList.length} sent successfully to ${email}`);
+      console.log(`✓ Email ${emailIndex}/${filteredEmailList.length} sent successfully to ${email}`);
       results.successful.push({
         email,
         timestamp: new Date(),
         index: emailIndex
       });
     } catch (error) {
-      console.error(`✗ Email ${emailIndex}/${emailList.length} failed for ${email}:`, error.message);
+      console.error(`✗ Email ${emailIndex}/${filteredEmailList.length} failed for ${email}:`, error.message);
       results.failed.push({
         email,
         error: error.message,
@@ -100,7 +109,7 @@ const sendBulkEmails = async (emailList, subject, htmlBody, options = {}) => {
     }
 
     // Add delay between emails (except for the last one)
-    if (i < emailList.length - 1) {
+    if (i < filteredEmailList.length - 1) {
       await delay(delayMs);
     }
   }
