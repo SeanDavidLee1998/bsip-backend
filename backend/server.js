@@ -20,29 +20,48 @@ const smsRoutes = require('./routes/smsRoutes'); // Import SMS routes
 
 // Initialize Firebase Admin SDK
 let serviceAccount;
-if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-  // Use environment variable (for production)
-  serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-} else {
-  // Use local file (for development)
-  try {
-    serviceAccount = require('./firebase-service-account.json');
-  } catch (error) {
-    console.log('Firebase service account not found. Firebase features will be disabled.');
-    serviceAccount = null;
-  }
-}
+let db;
 
-if (serviceAccount) {
+try {
+  if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_CLIENT_EMAIL) {
+    // Use individual environment variables (for production)
+    serviceAccount = {
+      type: "service_account",
+      project_id: process.env.FIREBASE_PROJECT_ID,
+      private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      client_email: process.env.FIREBASE_CLIENT_EMAIL,
+      auth_uri: "https://accounts.google.com/o/oauth2/auth",
+      token_uri: "https://oauth2.googleapis.com/token",
+      auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
+      client_x509_cert_url: `https://www.googleapis.com/robot/v1/metadata/x509/${encodeURIComponent(process.env.FIREBASE_CLIENT_EMAIL)}`
+    };
+    console.log('Firebase service account loaded from environment variables');
+  } else {
+    // Use local file (for development)
+    serviceAccount = require('./firebase-service-account.json');
+    console.log('Firebase service account loaded from local file');
+  }
+  
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount)
   });
-} else {
-  // Initialize without credentials (for development/testing)
-  admin.initializeApp();
+  
+  db = admin.firestore();
+  console.log('Firebase Admin SDK initialized successfully');
+} catch (error) {
+  console.error('Firebase initialization error:', error.message);
+  console.log('Firebase features will be disabled. Backend will still work for email/SMS.');
+  
+  // Initialize without credentials as fallback
+  try {
+    admin.initializeApp();
+    db = admin.firestore();
+    console.log('Firebase initialized without credentials (limited functionality)');
+  } catch (fallbackError) {
+    console.log('Firebase completely disabled');
+    db = null;
+  }
 }
-
-const db = admin.firestore();
 
 const app = express();
 const PORT = process.env.PORT || 3001; // Changed to 3001 to avoid conflict with React
@@ -318,6 +337,16 @@ app.get('/api/bulk-email/templates', (req, res) => {
 app.get('/api/bulk-email/test-connection', async (req, res) => {
   try {
     const result = await testConnection();
+    
+    // If it's a quota error, return 429 status
+    if (result.isQuotaError) {
+      return res.status(429).json({
+        success: false,
+        message: result.message,
+        isQuotaError: true
+      });
+    }
+    
     res.status(200).json(result);
   } catch (error) {
     console.error('Connection test error:', error);
@@ -336,6 +365,24 @@ app.post('/api/bulk-email/send', validateBulkEmailRequest, async (req, res) => {
       personalization,
       customData
     });
+    
+    // Check if any emails failed due to quota limit
+    const quotaErrors = results.failed.filter(f => f.isQuotaError);
+    if (quotaErrors.length > 0) {
+      return res.status(429).json({
+        message: 'SendGrid daily email limit reached. Some emails were sent successfully.',
+        results: {
+          total: results.total,
+          successful: results.successful.length,
+          failed: results.failed.length,
+          successRate: results.successRate,
+          duration: results.duration,
+          quotaLimitReached: true,
+          failedEmails: results.failed.map(f => ({ email: f.email, error: f.error, isQuotaError: f.isQuotaError }))
+        }
+      });
+    }
+    
     // Update sent status for each successful email if templateKey is set
     if (templateKey) {
       for (const s of results.successful) {

@@ -99,13 +99,39 @@ const sendBulkEmails = async (emailList, subject, htmlBody, options = {}) => {
         index: emailIndex
       });
     } catch (error) {
-      console.error(`✗ Email ${emailIndex}/${filteredEmailList.length} failed for ${email}:`, error.message);
+      // Check for SendGrid quota/limit errors
+      let errorMessage = error.message;
+      let isQuotaError = false;
+      
+      if (error.response && error.response.body && error.response.body.errors) {
+        const sendGridError = error.response.body.errors[0];
+        if (sendGridError && (
+          sendGridError.message.includes('limit') ||
+          sendGridError.message.includes('quota') ||
+          sendGridError.message.includes('exceeded') ||
+          error.response.statusCode === 429 ||
+          error.response.statusCode === 403
+        )) {
+          isQuotaError = true;
+          errorMessage = 'SendGrid daily email limit reached. Please try again tomorrow or upgrade your SendGrid plan.';
+          console.error(`✗ SendGrid quota limit reached. Daily limit exceeded.`);
+        }
+      }
+      
+      console.error(`✗ Email ${emailIndex}/${filteredEmailList.length} failed for ${email}:`, errorMessage);
       results.failed.push({
         email,
-        error: error.message,
+        error: errorMessage,
+        isQuotaError: isQuotaError,
         timestamp: new Date(),
         index: emailIndex
       });
+      
+      // If this is a quota error, stop sending more emails
+      if (isQuotaError) {
+        console.log(`⚠️ Stopping bulk email send due to SendGrid quota limit. ${results.successful.length} emails sent successfully.`);
+        break;
+      }
     }
 
     // Add delay between emails (except for the last one)
@@ -140,7 +166,29 @@ const testConnection = async () => {
     });
     return { success: true, message: 'SendGrid connection successful' };
   } catch (error) {
-    return { success: false, message: error.message };
+    // Check for SendGrid quota/limit errors
+    let errorMessage = error.message;
+    let isQuotaError = false;
+    
+    if (error.response && error.response.body && error.response.body.errors) {
+      const sendGridError = error.response.body.errors[0];
+      if (sendGridError && (
+        sendGridError.message.includes('limit') ||
+        sendGridError.message.includes('quota') ||
+        sendGridError.message.includes('exceeded') ||
+        error.response.statusCode === 429 ||
+        error.response.statusCode === 403
+      )) {
+        isQuotaError = true;
+        errorMessage = 'SendGrid daily email limit reached. Please try again tomorrow or upgrade your SendGrid plan.';
+      }
+    }
+    
+    return { 
+      success: false, 
+      message: errorMessage,
+      isQuotaError: isQuotaError
+    };
   }
 };
 
