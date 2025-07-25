@@ -1,28 +1,33 @@
 // mailer.js
-const sgMail = require('@sendgrid/mail');
-require('dotenv').config();
+const axios = require('axios');
 
-sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+const MAILTRAP_API_TOKEN = process.env.MAILTRAP_API_TOKEN;
+const MAILTRAP_SENDER = process.env.MAILTRAP_SENDER;
 
-// Function to send email using SendGrid
-const sendEmail = async (to, subject, text) => {
-  console.log('sendEmail called with:', { to, subject, text: text.substring(0, 50) + '...' });
-
-  const msg = {
-    to,
-    from: process.env.SENDGRID_FROM,
-    subject,
-    text,
-  };
-
+async function sendBulkEmail(toList, subject, html) {
   try {
-    const info = await sgMail.send(msg);
-    console.log('Email sent via SendGrid:', info);
-    return info;
+    const response = await axios.post(
+      'https://bulk.api.mailtrap.io/api/send',
+      {
+        from: { email: MAILTRAP_SENDER, name: 'Your App' },
+        to: toList.map(email => ({ email })),
+        subject,
+        html,
+        category: 'Bulk Send'
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${MAILTRAP_API_TOKEN}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    console.log('Mailtrap API response:', response.data);
+    return response.data;
   } catch (error) {
-    console.error('Error sending email via SendGrid: ', error);
+    console.error('Mailtrap API send error:', error.response ? error.response.data : error);
     throw error;
   }
-};
+}
 
-module.exports = { sendEmail };
+module.exports = { sendBulkEmail };

@@ -1,7 +1,5 @@
-const sgMail = require('@sendgrid/mail');
+const { sendBulkEmail } = require('./mailer');
 require('dotenv').config();
-
-sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
 // Delay function for throttling
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -17,177 +15,52 @@ const sendBulkEmails = async (emailList, subject, htmlBody, options = {}) => {
   const filteredEmailList = emailList.filter(
     email => !EXCLUDED_EMAILS.includes(email.toLowerCase())
   );
+  // Use filteredEmailList for sending
   const {
-    delayMs = 500, // 500ms delay between emails
-    from = process.env.SENDGRID_FROM || process.env.SMTP_FROM || process.env.SMTP_USER,
-    replyTo = process.env.SENDGRID_REPLYTO || process.env.SMTP_FROM || process.env.SMTP_USER,
     personalization = false, // Whether to personalize emails
     customData = {} // Custom data for personalization
   } = options;
 
-  const results = {
-    successful: [],
-    failed: [],
-    total: filteredEmailList.length,
-    startTime: new Date(),
-    endTime: null
-  };
-
-  console.log(`Starting bulk email send to ${filteredEmailList.length} recipients (SendGrid)`);
-
-  for (let i = 0; i < filteredEmailList.length; i++) {
-    const email = filteredEmailList[i];
-    const emailIndex = i + 1;
-
-    try {
-      // Prepare email content
+  // If personalization is needed, send individually (Mailtrap API does not support per-recipient personalization in one call)
+  if (personalization && Object.keys(customData).length > 0) {
+    const results = { successful: [], failed: [], total: filteredEmailList.length };
+    for (const email of filteredEmailList) {
       let finalHtmlBody = htmlBody;
       let finalSubject = subject;
-
-      // Apply personalization if enabled
-      if (personalization && customData[email]) {
+      if (customData[email]) {
         const data = customData[email];
-        finalHtmlBody = htmlBody
-          .replace(/\{\{name\}\}/g, data.name || '')
-          .replace(/\{\{Name\}\}/g, data.Name || '')
-          .replace(/\{\{company\}\}/g, data.company || '')
-          .replace(/\{\{customField\}\}/g, data.customField || '')
-          .replace(/\{\{clientName\}\}/g, data.clientName || '')
-          .replace(/\{\{caseType\}\}/g, data.caseType || '')
-          .replace(/\{\{lawyerName\}\}/g, data.lawyerName || '')
-          .replace(/\{\{deadlineType\}\}/g, data.deadlineType || '')
-          .replace(/\{\{dueDate\}\}/g, data.dueDate || '')
-          .replace(/\{\{amount\}\}/g, data.amount || '')
-          .replace(/\{\{packageName\}\}/g, data.packageName || '')
-          .replace(/\{\{packagePrice\}\}/g, data.packagePrice || '')
-          .replace(/\{\{trademarkName\}\}/g, data.trademarkName || '')
-          .replace(/\{\{infringingParty\}\}/g, data.infringingParty || '')
-          .replace(/\{\{legalAction\}\}/g, data.legalAction || '')
-          .replace(/\{\{responseDeadline\}\}/g, data.responseDeadline || '')
-          .replace(/\{\{firmName\}\}/g, data.firmName || '')
-          .replace(/\{\{firmAddress\}\}/g, data.firmAddress || '')
-          .replace(/\{\{firmPhone\}\}/g, data.firmPhone || '')
-          .replace(/\{\{firmEmail\}\}/g, data.firmEmail || '')
-          .replace(/\{\{Mark\}\}/g, data.Mark || '')
-          .replace(/\{\{Serial Number\}\}/g, data['Serial Number'] || '');
-        finalSubject = subject
-          .replace(/\{\{name\}\}/g, data.name || '')
-          .replace(/\{\{Name\}\}/g, data.Name || '')
-          .replace(/\{\{company\}\}/g, data.company || '')
-          .replace(/\{\{clientName\}\}/g, data.clientName || '')
-          .replace(/\{\{caseType\}\}/g, data.caseType || '')
-          .replace(/\{\{lawyerName\}\}/g, data.lawyerName || '')
-          .replace(/\{\{trademarkName\}\}/g, data.trademarkName || '')
-          .replace(/\{\{infringingParty\}\}/g, data.infringingParty || '')
-          .replace(/\{\{Mark\}\}/g, data.Mark || '')
-          .replace(/\{\{Serial Number\}\}/g, data['Serial Number'] || '');
+        finalHtmlBody = htmlBody.replace(/\{\{name\}\}/g, data.name || '');
+        finalSubject = subject.replace(/\{\{name\}\}/g, data.name || '');
       }
-
-      const msg = {
-        to: email,
-        from: from,
-        subject: finalSubject,
-        html: finalHtmlBody,
-        replyTo: replyTo
-      };
-
-      await sgMail.send(msg);
-      console.log(`✓ Email ${emailIndex}/${filteredEmailList.length} sent successfully to ${email}`);
-      results.successful.push({
-        email,
-        timestamp: new Date(),
-        index: emailIndex
-      });
-    } catch (error) {
-      // Check for SendGrid quota/limit errors
-      let errorMessage = error.message;
-      let isQuotaError = false;
-      
-      if (error.response && error.response.body && error.response.body.errors) {
-        const sendGridError = error.response.body.errors[0];
-        if (sendGridError && (
-          sendGridError.message.includes('limit') ||
-          sendGridError.message.includes('quota') ||
-          sendGridError.message.includes('exceeded') ||
-          error.response.statusCode === 429 ||
-          error.response.statusCode === 403
-        )) {
-          isQuotaError = true;
-          errorMessage = 'SendGrid daily email limit reached. Please try again tomorrow or upgrade your SendGrid plan.';
-          console.error(`✗ SendGrid quota limit reached. Daily limit exceeded.`);
-        }
-      }
-      
-      console.error(`✗ Email ${emailIndex}/${filteredEmailList.length} failed for ${email}:`, errorMessage);
-      results.failed.push({
-        email,
-        error: errorMessage,
-        isQuotaError: isQuotaError,
-        timestamp: new Date(),
-        index: emailIndex
-      });
-      
-      // If this is a quota error, stop sending more emails
-      if (isQuotaError) {
-        console.log(`⚠️ Stopping bulk email send due to SendGrid quota limit. ${results.successful.length} emails sent successfully.`);
-        break;
+      try {
+        await sendBulkEmail([email], finalSubject, finalHtmlBody);
+        results.successful.push(email);
+      } catch (error) {
+        results.failed.push({ email, error: error.message });
       }
     }
-
-    // Add delay between emails (except for the last one)
-    if (i < filteredEmailList.length - 1) {
-      await delay(delayMs);
-    }
+    return results;
   }
 
-  results.endTime = new Date();
-  results.duration = results.endTime - results.startTime;
-  results.successRate = (results.successful.length / results.total) * 100;
-
-  console.log(`Bulk email send completed:`);
-  console.log(`- Total: ${results.total}`);
-  console.log(`- Successful: ${results.successful.length}`);
-  console.log(`- Failed: ${results.failed.length}`);
-  console.log(`- Success Rate: ${results.successRate.toFixed(2)}%`);
-  console.log(`- Duration: ${results.duration}ms`);
-
-  return results;
+  // Otherwise, send all at once
+  try {
+    await sendBulkEmail(filteredEmailList, subject, htmlBody);
+    return { successful: filteredEmailList, failed: [], total: filteredEmailList.length };
+  } catch (error) {
+    return { successful: [], failed: filteredEmailList.map(email => ({ email, error: error.message })), total: filteredEmailList.length };
+  }
 };
 
 // Test SMTP connection
 const testConnection = async () => {
   try {
-    await sgMail.send({
-      to: 'test@example.com', // Test recipient
-      from: process.env.SENDGRID_FROM || process.env.SMTP_FROM || process.env.SMTP_USER,
-      subject: 'Test Email from SendGrid',
-      html: '<h1>This is a test email from SendGrid.</h1>',
-      replyTo: process.env.SENDGRID_REPLYTO || process.env.SMTP_FROM || process.env.SMTP_USER
-    });
+    await sendBulkEmail(['test@example.com'], 'Test Email from SendGrid', '<h1>This is a test email from SendGrid.</h1>');
     return { success: true, message: 'SendGrid connection successful' };
   } catch (error) {
-    // Check for SendGrid quota/limit errors
-    let errorMessage = error.message;
-    let isQuotaError = false;
-    
-    if (error.response && error.response.body && error.response.body.errors) {
-      const sendGridError = error.response.body.errors[0];
-      if (sendGridError && (
-        sendGridError.message.includes('limit') ||
-        sendGridError.message.includes('quota') ||
-        sendGridError.message.includes('exceeded') ||
-        error.response.statusCode === 429 ||
-        error.response.statusCode === 403
-      )) {
-        isQuotaError = true;
-        errorMessage = 'SendGrid daily email limit reached. Please try again tomorrow or upgrade your SendGrid plan.';
-      }
-    }
-    
     return { 
       success: false, 
-      message: errorMessage,
-      isQuotaError: isQuotaError
+      message: error.message,
+      isQuotaError: false // Mailtrap does not have a direct quota limit error like SendGrid
     };
   }
 };
