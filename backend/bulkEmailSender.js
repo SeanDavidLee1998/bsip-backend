@@ -34,7 +34,7 @@ const sendBulkEmails = async (emailList, subject, htmlBody, options = {}) => {
       }
       try {
         await sendBulkEmail([email], finalSubject, finalHtmlBody);
-        results.successful.push(email);
+        results.successful.push({ email });
       } catch (error) {
         results.failed.push({ email, error: error.message });
       }
@@ -45,9 +45,17 @@ const sendBulkEmails = async (emailList, subject, htmlBody, options = {}) => {
   // Otherwise, send all at once
   try {
     await sendBulkEmail(filteredEmailList, subject, htmlBody);
-    return { successful: filteredEmailList, failed: [], total: filteredEmailList.length };
+    return { 
+      successful: filteredEmailList.map(email => ({ email })), 
+      failed: [], 
+      total: filteredEmailList.length 
+    };
   } catch (error) {
-    return { successful: [], failed: filteredEmailList.map(email => ({ email, error: error.message })), total: filteredEmailList.length };
+    return { 
+      successful: [], 
+      failed: filteredEmailList.map(email => ({ email, error: error.message })), 
+      total: filteredEmailList.length 
+    };
   }
 };
 

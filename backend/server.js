@@ -541,14 +541,28 @@ app.post('/api/bulk-import', upload.single('file'), async (req, res) => {
 });
 
 const updateClientTemplateSentStatus = async (email, templateKey) => {
-  // Find client by email (in emails array)
-  const snapshot = await db.collection('clients').where('emails', 'array-contains', email).get();
-  if (!snapshot.empty) {
-    const clientRef = snapshot.docs[0].ref;
-    const clientData = snapshot.docs[0].data();
-    const sentTemplates = clientData.sentTemplates || {};
-    sentTemplates[templateKey] = true;
-    await clientRef.update({ sentTemplates });
+  try {
+    // Find client by email (in emails array)
+    const snapshot = await db.collection('clients').where('emails', 'array-contains', email).get();
+    if (!snapshot.empty) {
+      const clientRef = snapshot.docs[0].ref;
+      const clientData = snapshot.docs[0].data();
+      
+      // Ensure sentTemplates exists and is an object
+      const sentTemplates = clientData.sentTemplates || {};
+      
+      // Only update if templateKey is defined
+      if (templateKey) {
+        sentTemplates[templateKey] = true;
+        await clientRef.update({ sentTemplates });
+        console.log(`Updated sent status for email ${email} and template ${templateKey}`);
+      }
+    } else {
+      console.log(`No client found for email: ${email}`);
+    }
+  } catch (error) {
+    console.error(`Error updating template sent status for email ${email}:`, error);
+    // Don't throw the error - just log it so it doesn't break the email sending
   }
 };
 
