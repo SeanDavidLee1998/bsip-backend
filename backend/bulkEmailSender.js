@@ -29,8 +29,19 @@ const sendBulkEmails = async (emailList, subject, htmlBody, options = {}) => {
       let finalSubject = subject;
       if (customData[email]) {
         const data = customData[email];
-        finalHtmlBody = htmlBody.replace(/\{\{name\}\}/g, data.name || '');
-        finalSubject = subject.replace(/\{\{name\}\}/g, data.name || '');
+        
+        // Replace all template variables in both subject and HTML body
+        Object.keys(data).forEach(key => {
+          const placeholder = `{{${key}}}`;
+          const value = data[key] || '';
+          finalHtmlBody = finalHtmlBody.replace(new RegExp(placeholder, 'g'), value);
+          finalSubject = finalSubject.replace(new RegExp(placeholder, 'g'), value);
+        });
+        
+        console.log(`Personalized email for ${email}:`, {
+          subject: finalSubject,
+          htmlLength: finalHtmlBody.length
+        });
       }
       try {
         await sendBulkEmail([email], finalSubject, finalHtmlBody);
