@@ -1,33 +1,51 @@
 // mailer.js
-const axios = require('axios');
+const formData = require('form-data');
+const Mailgun = require('mailgun.js');
+const mailgun = new Mailgun(formData);
 
-const MAILTRAP_API_TOKEN = process.env.MAILTRAP_API_TOKEN;
-const MAILTRAP_SENDER = process.env.MAILTRAP_SENDER;
+const MAILGUN_API_KEY = process.env.MAILGUN_API_KEY;
+const MAILGUN_DOMAIN = process.env.MAILGUN_DOMAIN;
+const MAILGUN_SENDER = process.env.MAILGUN_SENDER || 'noreply@yourdomain.com';
+
+// Initialize Mailgun client
+const mg = mailgun.client({ username: 'api', key: MAILGUN_API_KEY });
 
 async function sendBulkEmail(toList, subject, html) {
   try {
-    const response = await axios.post(
-      'https://bulk.api.mailtrap.io/api/send',
-      {
-        from: { email: MAILTRAP_SENDER, name: 'Your App' },
-        to: toList.map(email => ({ email })),
-        subject,
-        html,
-        category: 'Bulk Send'
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${MAILTRAP_API_TOKEN}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-    console.log('Mailtrap API response:', response.data);
-    return response.data;
+    // Mailgun allows sending to multiple recipients in one request
+    const messageData = {
+      from: MAILGUN_SENDER,
+      to: toList.join(','),
+      subject: subject,
+      html: html
+    };
+
+    const response = await mg.messages.create(MAILGUN_DOMAIN, messageData);
+    console.log('Mailgun API response:', response);
+    return response;
   } catch (error) {
-    console.error('Mailtrap API send error:', error.response ? error.response.data : error);
+    console.error('Mailgun API send error:', error);
     throw error;
   }
 }
 
-module.exports = { sendBulkEmail };
+// For individual emails (if needed)
+async function sendEmail(to, subject, text) {
+  try {
+    const messageData = {
+      from: MAILGUN_SENDER,
+      to: to,
+      subject: subject,
+      text: text
+    };
+
+    const response = await mg.messages.create(MAILGUN_DOMAIN, messageData);
+    console.log('Mailgun individual email response:', response);
+    return response;
+  } catch (error) {
+    console.error('Mailgun individual email error:', error);
+    throw error;
+  }
+}
+
+module.exports = { sendBulkEmail, sendEmail };

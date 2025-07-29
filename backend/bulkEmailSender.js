@@ -43,12 +43,13 @@ const sendBulkEmails = async (emailList, subject, htmlBody, options = {}) => {
           htmlLength: finalHtmlBody.length
         });
       }
-      try {
-        await sendBulkEmail([email], finalSubject, finalHtmlBody);
-        results.successful.push({ email });
-      } catch (error) {
-        results.failed.push({ email, error: error.message });
-      }
+                    try {
+                await sendBulkEmail([email], finalSubject, finalHtmlBody);
+                results.successful.push({ email });
+              } catch (error) {
+                console.error(`Failed to send email to ${email}:`, error);
+                results.failed.push({ email, error: error.message });
+              }
     }
     return results;
   }
